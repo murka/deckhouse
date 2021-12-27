@@ -13,25 +13,25 @@
 # limitations under the License.
 
 module "vpc" {
-  source = "../../../terraform-modules/vpc"
-  prefix = local.prefix
+  source          = "../../../terraform-modules/vpc"
+  prefix          = local.prefix
   existing_vpc_id = local.existing_vpc_id
-  cidr_block = local.vpc_network_cidr
-  tags = local.tags
+  cidr_block      = local.vpc_network_cidr
+  tags            = local.tags
 }
 
 module "security-groups" {
-  source = "../../../terraform-modules/security-groups"
-  prefix = local.prefix
+  source       = "../../../terraform-modules/security-groups"
+  prefix       = local.prefix
   cluster_uuid = var.clusterUUID
-  vpc_id = module.vpc.id
-  tags = local.tags
+  vpc_id       = module.vpc.id
+  tags         = local.tags
 }
 
 data "aws_availability_zones" "available" {}
 
 locals {
-  az_count = length(data.aws_availability_zones.available.names)
+  az_count    = length(data.aws_availability_zones.available.names)
   subnet_cidr = lookup(var.providerClusterConfiguration, "nodeNetworkCIDR", module.vpc.cidr_block)
 }
 
@@ -43,9 +43,9 @@ resource "aws_subnet" "kube_public" {
   map_public_ip_on_launch = true
 
   tags = merge(local.tags, {
-    Name = "${local.prefix}-public-${count.index}"
+    Name                                       = "${local.prefix}-public-${count.index}"
     "kubernetes.io/cluster/${var.clusterUUID}" = "shared"
-    "kubernetes.io/cluster/${local.prefix}" = "shared"
+    "kubernetes.io/cluster/${local.prefix}"    = "shared"
   })
 }
 
@@ -61,9 +61,9 @@ resource "aws_route_table" "kube_public" {
   vpc_id = module.vpc.id
 
   tags = merge(local.tags, {
-    Name = "${local.prefix}-public"
+    Name                                       = "${local.prefix}-public"
     "kubernetes.io/cluster/${var.clusterUUID}" = "shared"
-    "kubernetes.io/cluster/${local.prefix}" = "shared"
+    "kubernetes.io/cluster/${local.prefix}"    = "shared"
   })
 }
 
@@ -129,10 +129,75 @@ resource "aws_iam_instance_profile" "node" {
 }
 
 resource "aws_key_pair" "ssh" {
-  key_name = local.prefix
+  key_name   = local.prefix
   public_key = var.providerClusterConfiguration.sshPublicKey
 
   tags = merge(local.tags, {
     Cluster = local.prefix
   })
+}
+
+// vpc peering
+
+locals {
+  peer_vpc_ids = lookup(var.providerClusterConfiguration, "peeredVPCs", [])
+}
+
+data "aws_caller_identity" "kube" {}
+
+resource "aws_vpc_peering_connection" "kube" {
+  count         = length(local.peer_vpc_ids)
+  vpc_id        = module.vpc.id
+  peer_vpc_id   = local.peer_vpc_ids[count.index]
+  peer_owner_id = data.aws_caller_identity.kube.account_id
+  peer_region   = var.providerClusterConfiguration.provider.region
+  auto_accept   = false
+
+  tags = merge(local.tags, {
+    Name = local.prefix
+  })
+}
+
+resource "aws_vpc_peering_connection_accepter" "kube" {
+  count                     = length(local.peer_vpc_ids)
+  vpc_peering_connection_id = aws_vpc_peering_connection.kube[count.index].id
+  auto_accept               = true
+
+  tags = merge(local.tags, {
+    Name = local.prefix
+  })
+}
+
+resource "aws_route" "kube" {
+  count                     = length(local.peer_vpc_ids)
+  route_table_id            = aws_route_table.kube_internal.id
+  destination_cidr_block    = data.aws_vpc.target[count.index].cidr_block
+  vpc_peering_connection_id = aws_vpc_peering_connection.kube[count.index].id
+  depends_on                = [aws_route_table.kube_internal]
+}
+
+data "aws_vpc" "target" {
+  count = length(local.peer_vpc_ids)
+  id    = local.peer_vpc_ids[count.index]
+}
+
+data "aws_subnets" "target" {
+  count = length(local.peer_vpc_ids)
+  filter {
+    name   = "vpc-id"
+    values = [local.peer_vpc_ids[count.index]]
+  }
+}
+
+data "aws_route_table" "target" {
+  count     = length(local.peer_vpc_ids)
+  subnet_id = data.aws_subnets.target[count.index].ids[0]
+}
+
+resource "aws_route" "target" {
+  count                     = length(local.peer_vpc_ids)
+  route_table_id            = data.aws_route_table.target[count.index].id
+  destination_cidr_block    = module.vpc.cidr_block
+  vpc_peering_connection_id = aws_vpc_peering_connection.kube[count.index].id
+  depends_on                = [aws_route_table.kube_internal]
 }
