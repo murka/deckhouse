@@ -82,6 +82,10 @@ Below, you can find instructions on how to apply this policy.
                 "ec2:RevokeSecurityGroupIngress",
                 "ec2:RunInstances",
                 "ec2:TerminateInstances",
+                "ec2:DescribeVpcPeeringConnections",
+                "ec2:CreateVpcPeeringConnection",
+                "ec2:DeleteVpcPeeringConnection",
+                "ec2:AcceptVpcPeeringConnection",
                 "elasticloadbalancing:AddTags",
                 "elasticloadbalancing:ApplySecurityGroupsToLoadBalancer",
                 "elasticloadbalancing:AttachLoadBalancerToSubnets",
@@ -148,7 +152,7 @@ Below, you can find instructions on how to apply this policy.
 * Click `Create Policy`
 * Open the `Users` page of IAM and click `Add users`
 * Enter a name in the `User name` field (e.g., `deckhouse`)
-* Select `Access key - Programmatic access` in the `Select AWS credential type` area 
+* Select `Access key - Programmatic access` in the `Select AWS credential type` area
 * Click `Next: Permissions`
 * Select the `Attach existing policies directly` tab
 * Search (use the `Filter policies` field) for the policy name entered above (e.g., `D8CloudProviderAWS`) and click the checkbox next to it
