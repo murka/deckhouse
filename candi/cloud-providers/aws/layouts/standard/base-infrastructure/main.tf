@@ -200,7 +200,7 @@ resource "aws_vpc_peering_connection" "kube" {
   count         = length(local.peer_vpc_ids)
   vpc_id        = module.vpc.id
   peer_vpc_id   = local.peer_vpc_ids[count.index]
-  peer_owner_id = data.aws_caller_identity.kube.account_id
+  peer_owner_id = data.aws_caller_identity.kube.account_id // peer_owner_id and our local account_id are equal cause we only support peering within single account
   peer_region   = var.providerClusterConfiguration.provider.region
   auto_accept   = false
 
