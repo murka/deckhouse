@@ -1,0 +1,16 @@
+positive:
+  values: []
+
+negative:
+  helmValues:
+  - x-test-focus: focus
+    internal:
+      prometheusAPIClientTLS:
+        certificate: cert
+        key: key
+      customMetrics:
+        daemonset: { }
+  - x-test-focus: focus
+    internal:
+      customMetrics:
+        daemonset: { }
