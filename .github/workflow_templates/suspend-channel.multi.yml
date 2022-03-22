@@ -25,13 +25,16 @@ on:
     inputs:
       issue_id:
         description: 'Id of issue where label was set'
-        required: true
+        required: false
       issue_number:
         description: 'Number of issue where label was set'
-        required: true
+        required: false
       comment_id:
         description: 'Id of comment in issue where to put workflow run status'
-        required: true
+        required: false
+      suspend_tag:
+        description: 'Set to suspend specified tag'
+        required: false
 
 env:
 {!{ tmpl.Exec "werf_envs" | strings.Indent 2 }!}
@@ -42,13 +45,44 @@ env:
 jobs:
 {!{ tmpl.Exec "git_info_job" . | strings.Indent 2 }!}
 
+  detect_version:
+    name: Detect version
+    needs:
+      - git_info
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{steps.detect_version.outputs.version}}
+    steps:
+      - name: Detect version
+        id: detect_version
+        env:
+          CI_COMMIT_TAG: ${{needs.git_info.outputs.ci_commit_tag}}
+          CI_COMMIT_REF_NAME: ${{needs.git_info.outputs.ci_commit_ref_name}}
+          SUSPEND_TAG: ${{ github.event.inputs.suspend_tag }}
+        run: |
+          if [[ -n ${SUSPEND_TAG} ]] ; then
+            echo "::notice title=Suspend version::Workflow started from '${CI_COMMIT_REF_NAME}', but suspend_tag input is set. Use '${SUSPEND_REVISION}' as suspend version."
+            echo "::set-output name=version::${SUSPEND_TAG}"
+            exit 0
+          fi
+          if [[ -n ${CI_COMMIT_TAG} ]] ; then
+            echo "::notice title=Suspend version::Workflow started from tag '${CI_COMMIT_TAG}'. Use it as suspend version."
+            echo "::set-output name=version::${CI_COMMIT_TAG}"
+            exit 0
+          fi
+
+          echo "::error title=Wrong environment::Seems you try to suspend branch '${CI_COMMIT_REF_NAME}'. Use suspend_tag input or run workflow from tag."
+          exit 1
+
+
   run_suspend:
-    name: Suspend deckhouse release on {!{ .channel }!} channel
+    name: Suspend ${{needs.detect_version.outputs.version}} on {!{ .channel }!} channel
     environment:
       name: {!{ .channel }!}
     needs:
       - git_info
-    runs-on: self-hosted
+      - detect_version
+    runs-on: [self-hosted, regular]
     steps:
 {!{ tmpl.Exec "started_at_output" . | strings.Indent 6 }!}
 {!{ tmpl.Exec "checkout_from_event_ref_step" . | strings.Indent 6 }!}
@@ -69,18 +103,28 @@ Destination registries:
       - name: Publish release images for {!{ $werfEnv }!}
         env:
           DECKHOUSE_REGISTRY_HOST: ${{secrets.DECKHOUSE_REGISTRY_HOST}}
-          CI_COMMIT_TAG: ${{needs.git_info.outputs.ci_commit_tag}}
+          SUSPEND_VERSION: ${{needs.detect_version.outputs.version}}
           WERF_ENV: {!{ $werfEnv }!}
         run: |
           # Some precautions.
-          if [[ -z $DEV_REGISTRY_PATH ]] ; then
-            echo "DEV_REGISTRY_PATH is not set!"
+          shouldExit1=
+          if [[ -z ${DEV_REGISTRY_PATH} ]] ; then
+            echo "::error title=Missed variable::DEV_REGISTRY_PATH is not set. Define destination registry in secrets."
+            shouldExit1=yes
+          fi
+          if [[ -z ${WERF_ENV} ]] ; then
+            echo "::error title=Missed variable::WERF_ENV is not set. Cannot deploy unknown edition, only ce, ee and fe are allowed in inputs."
+            shouldExit1=yes
+          fi
+          if [[ -z ${SUSPEND_VERSION} ]] ; then
+            echo "::error title=Missed version::Suspend version not detected. Use suspend_tag input or run workflow from tag."
+            shouldExit1=yes
+          fi
+          if [[ -n ${shouldExit1} ]] ; then
             exit 1
           fi
-          if [[ -z $WERF_ENV ]] ; then
-            echo "WERF_ENV is not set!"
-            exit 1
-          fi
+
+          echo "Suspend version '${SUSPEND_VERSION}' for {!{ $werfEnv }!} edition".
 
           # Variables
           #   1. CE/EE/FE -> ce/ee/fe
@@ -98,7 +142,7 @@ Destination registries:
             DECKHOUSE_DESTINATION_RELEASE_VERSION_IMAGE=${CI_REGISTRY_IMAGE}/deckhouse/${REGISTRY_SUFFIX}/release-channel:${RELEASE_CHANNEL};
           fi
 
-          echo "{\"version\": \"$CI_COMMIT_REF_NAME\", \"suspend\": true}" > version.json
+          echo "{\"version\": \"${SUSPEND_VERSION}\", \"suspend\": true}" > version.json
           cat <<EOF >Dockerfile
           FROM spotify/scratch
           COPY version.json version.json
