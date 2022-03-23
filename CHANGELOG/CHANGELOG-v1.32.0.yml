@@ -1,0 +1,5 @@
+docs:
+  fixes:
+    - summary: Getting started - installing Deckhouse in a private environment.
+      pull_request: https://github.com/deckhouse/deckhouse/pull/996
+
